@@ -14,9 +14,23 @@ settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(app_: FastAPI):
+    # Initialize OpenSearch client if configured
     if settings.OS:
         await os_client.connect()
+
+    # Initialize vector backends for similarity pipeline
+    try:
+        from app.pipelines.similarity_pipeline.backends.factory import VectorBackendFactory
+        backend = VectorBackendFactory.create_backend(settings.VECTOR_BACKEND)
+        if backend:
+            await backend.connect()
+            pipeline_logger.info(f"Vector backend {backend.backend_name} initialized successfully")
+    except Exception as e:
+        pipeline_logger.error(f"Failed to initialize vector backend: {e}")
+
     yield
+
+    # Cleanup connections
     if settings.OS:
         await os_client.close()
 

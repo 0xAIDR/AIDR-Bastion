@@ -42,6 +42,14 @@ class Settings(BaseSettings):
     SIMILARITY_NOTIFY_THRESHOLD: float = 0.7
     SIMILARITY_BLOCK_THRESHOLD: float = 0.87
 
+    # Vector Backend Settings
+    VECTOR_BACKEND: str = "auto"  # auto, qdrant, opensearch
+
+    # Qdrant Settings
+    QDRANT_HOST: str = "localhost"
+    QDRANT_PORT: int = 6333
+    QDRANT_COLLECTION_NAME: Optional[str] = None
+
     CORS_ORIGINS: list[str] = Field(default=["*"], env="CORS_ORIGINS", description="List of allowed origins for CORS")
 
     EMBEDDINGS_MODEL: Optional[str] = None
