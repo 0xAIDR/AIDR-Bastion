@@ -12,3 +12,9 @@ einops==0.8.1
 nltk>=3.9
 sentence-transformers==4.1.0
 confluent-kafka>=2.3.0
+
+# Database
+sqlalchemy[asyncio]>=2.0.0
+alembic>=1.13.0
+asyncpg>=0.29.0
+aiosqlite>=0.19.0
