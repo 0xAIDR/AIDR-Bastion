@@ -1,0 +1,212 @@
+# Alembic Database Migrations
+
+This directory contains database migration scripts for AIDR Bastion.
+
+## Overview
+
+Alembic is used for managing database schema changes. It provides version control
+for your database schema, allowing you to upgrade and downgrade between different
+versions of the database structure.
+
+## Database Support
+
+- **SQLite** (Development): Default database for local development
+- **PostgreSQL** (Production): Recommended for production deployments
+
+## Quick Start
+
+### View Current Migration Version
+```bash
+alembic current
+```
+
+### View Migration History
+```bash
+alembic history --verbose
+```
+
+### Upgrade to Latest Version
+```bash
+alembic upgrade head
+```
+
+### Downgrade One Version
+```bash
+alembic downgrade -1
+```
+
+## Creating New Migrations
+
+### Auto-generate Migration (Recommended)
+After modifying models in `app/db/models/`:
+
+```bash
+alembic revision --autogenerate -m "Description of changes"
+```
+
+This will:
+1. Compare your models with the current database schema
+2. Generate a migration script with detected changes
+3. Save it to `alembic/versions/`
+
+**Important**: Always review auto-generated migrations before applying them!
+
+### Manual Migration
+For complex changes or data migrations:
+
+```bash
+alembic revision -m "Description of changes"
+```
+
+Then edit the generated file in `alembic/versions/` to add your migration logic.
+
+## Migration Commands
+
+### Upgrade
+```bash
+# Upgrade to latest version
+alembic upgrade head
+
+# Upgrade to specific version
+alembic upgrade <revision_id>
+
+# Upgrade one version forward
+alembic upgrade +1
+```
+
+### Downgrade
+```bash
+# Downgrade to specific version
+alembic downgrade <revision_id>
+
+# Downgrade one version back
+alembic downgrade -1
+
+# Downgrade to base (empty database)
+alembic downgrade base
+```
+
+### Information
+```bash
+# Show current version
+alembic current
+
+# Show migration history
+alembic history
+
+# Show detailed history with file paths
+alembic history --verbose
+
+# Show SQL that would be executed (dry run)
+alembic upgrade head --sql
+```
+
+## Configuration
+
+Database connection is configured in `settings.py`:
+
+```python
+DATABASE_URL = "sqlite+aiosqlite:///./data/aidr_bastion.db"  # Development
+# DATABASE_URL = "postgresql+asyncpg://user:pass@localhost/aidr_bastion"  # Production
+```
+
+The URL is automatically loaded from environment variables or `.env` file.
+
+## Migration File Structure
+
+Each migration file contains:
+
+```python
+def upgrade() -> None:
+    """Upgrade schema - apply changes"""
+    # SQL or SQLAlchemy operations to apply changes
+
+def downgrade() -> None:
+    """Downgrade schema - revert changes"""
+    # SQL or SQLAlchemy operations to revert changes
+```
+
+## Best Practices
+
+1. **Always backup database before running migrations in production**
+2. **Review auto-generated migrations** - they may not always be perfect
+3. **Test migrations** - always test upgrade and downgrade on a copy of production data
+4. **Keep migrations small** - one logical change per migration
+5. **Don't edit applied migrations** - create a new migration instead
+6. **Add descriptive messages** - helps team understand what changed
+
+## Troubleshooting
+
+### "Can't locate revision identified by 'XXX'"
+The database version doesn't match migration files. Either:
+- Run `alembic stamp head` to mark current version (if schema is correct)
+- Or restore from backup and re-run migrations
+
+### "Target database is not up to date"
+Run `alembic upgrade head` to apply pending migrations.
+
+### "Multiple heads in revision history"
+Merge branches using:
+```bash
+alembic merge -m "merge branches" <rev1> <rev2>
+```
+
+## Initial Setup (Already Done)
+
+The initial migration `001_initial` creates:
+- `rules` table - Detection rules storage
+- `events` table - Analysis events and results
+- `rule_triggers` table - Rule trigger tracking
+
+This was set up during initial database integration.
+
+## Environment Files
+
+- `alembic.ini` - Alembic configuration (in project root)
+- `env.py` - Migration environment setup
+- `script.py.mako` - Template for new migration files
+- `versions/` - Directory containing all migration scripts
+
+## Switching Databases
+
+### From SQLite to PostgreSQL
+
+1. Update `.env`:
+   ```bash
+   DATABASE_URL=postgresql+asyncpg://user:password@localhost/aidr_bastion
+   ```
+
+2. Create PostgreSQL database:
+   ```bash
+   createdb aidr_bastion
+   ```
+
+3. Run migrations:
+   ```bash
+   alembic upgrade head
+   ```
+
+### From PostgreSQL to SQLite
+
+1. Update `.env`:
+   ```bash
+   DATABASE_URL=sqlite+aiosqlite:///./data/aidr_bastion.db
+   ```
+
+2. Run migrations:
+   ```bash
+   alembic upgrade head
+   ```
+
+## Support
+
+For more information, see:
+- [Alembic Documentation](https://alembic.sqlalchemy.org/)
+- [SQLAlchemy Documentation](https://docs.sqlalchemy.org/)
+- Project README: `../README.md`
+
+## Notes
+
+- Migrations are run automatically on server startup via `init_db()`
+- For production, it's recommended to run migrations manually before deployment
+- Always test migrations in staging environment before production
