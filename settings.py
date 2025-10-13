@@ -138,6 +138,16 @@ class Settings(BaseSettings):
 
     ML_MODEL_PATH: Optional[str] = None
 
+    # Database Settings
+    DATABASE_URL: str = Field(
+        default="sqlite+aiosqlite:///./data/aidr_bastion.db",
+        description="Database URL (SQLite for dev, PostgreSQL for prod)",
+    )
+    DATABASE_ECHO: bool = Field(default=False, description="Echo SQL statements to console")
+    DATABASE_POOL_SIZE: int = Field(default=5, description="Database connection pool size")
+    DATABASE_MAX_OVERFLOW: int = Field(default=10, description="Max overflow connections")
+    DATABASE_SAVE_PROMPT: bool = Field(default=True, description="Save prompt text to database")
+
 
 def load_pipeline_config() -> dict:
     """

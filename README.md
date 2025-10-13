@@ -26,13 +26,17 @@ Inspired by LlamaFirewall.
 - **Client Managers**: Flexible client management (Elasticsearch, OpenSearch)
 - **RESTful API**: Easy integration with existing applications
 - **Extensible Architecture**: Simple plugin system for custom Pipelines
+- **Database Storage**: Local SQLite/PostgreSQL storage for rules and events with full CRUD API
+- **Event Analytics**: Complete audit trail with statistics and filtering capabilities
+- **Database Migrations**: Alembic-powered schema migrations for production deployments
+- **Web Admin Panel**: Modern Streamlit-based UI for system management and analytics
 
 ## 🏗️ Architecture
 
 ```
 ┌────────────────────────────────┐
 │   FastAPI Endpoint             │
-│   (POST /api/v1/run_pipeline)  │
+│   (POST /api/v1/flow/run)      │
 └──────────────┬─────────────────┘
                │
                ▼
@@ -65,6 +69,7 @@ Inspired by LlamaFirewall.
 - [Installation](#%EF%B8%8F-installation)
 - [Configuration](#%EF%B8%8F-configuration)
 - [Usage](#-usage)
+- [Web Admin Panel](#-web-admin-panel)
 - [API Reference](#-api-reference)
 - [Pipelines](#-pipelines)
 - [Managers](#-managers)
@@ -80,8 +85,9 @@ Inspired by LlamaFirewall.
 ### Prerequisites
 
 - Python 3.12+
-- OpenSearch or Elasticsearch (via Similarity Manager)
-- OpenAI API key (for LLM Pipeline)
+- OpenSearch or Elasticsearch (optional, via Similarity Manager)
+- OpenAI API key (optional, for LLM Pipeline)
+- SQLite (built-in) or PostgreSQL (for production)
 
 ### Quick Start
 
@@ -168,6 +174,14 @@ KAFKA__SASL_MECHANISM=
 KAFKA__SASL_USERNAME=
 KAFKA__SASL_PASSWORD=
 
+# Database configuration
+DATABASE_URL=sqlite+aiosqlite:///./data/aidr_bastion.db
+# For PostgreSQL: postgresql+asyncpg://user:password@localhost/aidr_bastion
+DATABASE_ECHO=false
+DATABASE_POOL_SIZE=5
+DATABASE_MAX_OVERFLOW=10
+DATABASE_SAVE_PROMPT=true
+
 # requires for creating embedding in pipelines: Similarity Pipeline and ML Pipeline
 EMBEDDINGS_MODEL=
 
@@ -239,7 +253,7 @@ Default `config.json` configuraton:
 import requests
 
 # Run pipeline analysis on a text prompt
-response = requests.post("http://localhost:8000/api/v1/run_pipeline", json={
+response = requests.post("http://localhost:8000/api/v1/flow/run", json={
     "prompt": "Your text to analyze here",
     "pipeline_flow": "base"  # Must match a flow_name from config.json
 })
@@ -249,7 +263,7 @@ print(f"Status: {result['status']}")  # allow, block, or notify
 print(f"Triggered rules: {result['result']}")
 
 # Get available flows and pipelines
-flows_response = requests.get("http://localhost:8000/api/v1/flows")
+flows_response = requests.get("http://localhost:8000/api/v1/flow/list")
 flows = flows_response.json()
 print(f"Available flows: {[flow['flow_name'] for flow in flows['flows']]}")
 
@@ -272,16 +286,61 @@ switch_result = switch_response.json()
 print(f"Client switched: {switch_result['status']}")
 ```
 
+### Managing Rules via API
+
+```python
+import requests
+
+# Create a new rule
+rule_data = {
+    "uuid": "550e8400-e29b-41d4-a716-446655440000",
+    "name": "Custom SQL Injection",
+    "details": "Detects SQL injection patterns",
+    "language": "llm-regex-pattern",
+    "pattern": "(?i)\\b(SELECT|INSERT)\\b.*\\bFROM\\b",
+    "action": "block",
+    "severity": "high",
+    "category": "injection",
+    "enabled": true
+}
+
+response = requests.post("http://localhost:8000/api/v1/rules", json=rule_data)
+print(f"Rule created: {response.json()['id']}")
+
+# List all rules
+rules = requests.get("http://localhost:8000/api/v1/rules").json()
+print(f"Total rules: {rules['total']}")
+
+# Get rules by category
+injection_rules = requests.get(
+    "http://localhost:8000/api/v1/rules",
+    params={"category": "injection"}
+).json()
+
+# Toggle rule
+rule_id = 1
+requests.patch(f"http://localhost:8000/api/v1/rules/{rule_id}/toggle")
+
+# Get event statistics
+stats = requests.get("http://localhost:8000/api/v1/events/stats").json()
+print(f"Blocked: {stats['blocked']}, Notified: {stats['notified']}")
+
+# Get recent events
+recent = requests.get("http://localhost:8000/api/v1/events/recent").json()
+```
+
 ### Python SDK Usage
 
 ```python
 from app.main import bastion_app
 
 # Direct usage
-result = await bastion_app.run_pipeline("Your prompt", "default")
+result = await bastion_app.run("Your prompt", "full_scan", task_id="task-123")
 print(f"Status: {result.status}")
 for pipeline in result.pipelines:
-    print(f"Pipeline: {pipeline._identifier}, Status: {pipeline.status}")
+    print(f"Pipeline: {pipeline.name}, Status: {pipeline.status}")
+
+# Events are automatically saved to database
 ```
 
 ### Integration with Existing Applications
@@ -294,14 +353,14 @@ import requests
 
 def check_prompt_safety(prompt: str):
     response = requests.post(
-        "http://localhost:8000/api/v1/run_pipeline",
+        "http://localhost:8000/api/v1/flow/run",
         json={
             "prompt": prompt,
             "pipeline_flow": "security_audit"
         }
     )
     result = response.json()
-    
+
     if result["status"] == "BLOCK":
         return False, "Prompt blocked"
     elif result["status"] == "NOTIFY":
@@ -339,18 +398,201 @@ def switch_to_elasticsearch():
 
 The project can be configured through environment variables:
 
+**Server Settings:**
 - `HOST`: Server host (default: 0.0.0.0)
 - `PORT`: Server port (default: 8000)
 - `CORS_ORIGINS`: Allowed origins for CORS
+
+**Database Settings:**
+- `DATABASE_URL`: Database connection URL
+  - SQLite: `sqlite+aiosqlite:///./data/aidr_bastion.db`
+  - PostgreSQL: `postgresql+asyncpg://user:password@localhost/aidr_bastion`
+- `DATABASE_ECHO`: Echo SQL statements (default: false)
+- `DATABASE_POOL_SIZE`: Connection pool size (default: 5)
+- `DATABASE_MAX_OVERFLOW`: Max overflow connections (default: 10)
+- `DATABASE_SAVE_PROMPT`: Save prompt text to database (default: true)
+
+**Pipeline Settings:**
 - `EMBEDDINGS_MODEL`: Hugging Face model for embeddings
-- `SIMILARITY_NOTIFY_THRESHOLD`: Threshold for notifications
-- `SIMILARITY_BLOCK_THRESHOLD`: Threshold for blocking
+- `SIMILARITY_NOTIFY_THRESHOLD`: Threshold for notifications (default: 0.7)
+- `SIMILARITY_BLOCK_THRESHOLD`: Threshold for blocking (default: 0.87)
 
 All required environments you can find in env.example
 
+## 🖥️ Web Admin Panel
+
+AIDR Bastion includes a modern web-based administration interface built with Streamlit, providing intuitive management of rules, events, and system analytics.
+
+### Quick Start
+
+**1. Ensure the main API is running:**
+```bash
+python server.py
+```
+
+**2. Launch the admin panel:**
+```bash
+# From project root
+streamlit run admin/app.py
+
+# Or from admin directory
+cd admin
+streamlit run app.py
+```
+
+**3. Access the interface:**
+Open your browser at `http://localhost:8501`
+
+### Features Overview
+
+#### 📊 Dashboard
+- **Real-time Statistics**: View blocked, notified, and allowed event counts
+- **Interactive Charts**: Visualize event distribution with Plotly charts
+  - Status distribution (pie chart)
+  - Events by flow type (bar chart)
+  - Events timeline (line chart)
+  - Top triggered rules (horizontal bar chart)
+- **System Health**: Monitor active pipelines and managers
+- **Recent Activity**: Quick view of latest events
+
+#### 📋 Rules Management
+- **Full CRUD Operations**: Create, read, update, and delete detection rules
+- **Advanced Filtering**: Filter by category, status, or search by name
+- **Quick Actions**:
+  - Toggle rules on/off with one click
+  - Bulk operations support
+  - Rule statistics and analytics
+- **Rich Editor**: Form-based rule creation with validation
+- **Categories**: injection, obfuscation, override, leakage, pii, semantic, dos
+
+#### 🔍 Events Viewer
+- **Comprehensive Browser**: View all security events with pagination
+- **Smart Filtering**: Filter by status, flow, time range
+- **Content Search**: Search within prompt text
+- **Detailed Inspection**: Expandable event details showing:
+  - Full prompt text (if saved)
+  - Triggered rules and their actions
+  - Pipeline execution results
+  - Timestamps and task IDs
+- **Export Capabilities**: Export filtered data to CSV/JSON
+- **Auto-refresh**: Optional real-time updates
+
+#### ⚙️ Settings
+- **Pipeline Configuration**: View enabled flows and pipelines
+- **Manager Overview**: Check status of Similarity and LLM managers
+- **Client Management**: View available clients for each manager
+- **System Information**: Database status, API connectivity
+- **API Configuration**: Test and configure API connection
+
+### Architecture
+
+```
+┌─────────────────────────────────────┐
+│   Streamlit Web Interface           │
+│   (http://localhost:8501)            │
+└──────────────┬──────────────────────┘
+               │
+               │ HTTP/REST
+               │
+┌──────────────▼──────────────────────┐
+│   AIDR Bastion API                  │
+│   (http://localhost:8000)            │
+│                                      │
+│   - Rules Management                 │
+│   - Events & Analytics               │
+│   - Flow Execution                   │
+│   - Manager Control                  │
+└─────────────────────────────────────┘
+```
+
+### Admin Panel Structure
+
+```
+admin/
+├── app.py                      # Main entry point
+├── pages/                      # Streamlit pages
+│   ├── 1_📊_Dashboard.py      # Analytics & charts
+│   ├── 2_📋_Rules.py          # Rules CRUD
+│   ├── 3_🔍_Events.py         # Events browser
+│   └── 4_⚙️_Settings.py       # System settings
+├── utils/
+│   └── api_client.py           # API wrapper
+└── .streamlit/
+    └── config.toml             # Streamlit config
+```
+
+### Requirements
+
+The admin panel requires additional dependencies (automatically installed with `requirements.txt`):
+- `streamlit>=1.31.0` - Web framework
+- `plotly>=5.18.0` - Interactive charts
+- `pandas>=2.1.0` - Data manipulation
+- `requests>=2.31.0` - HTTP client
+
+### Configuration
+
+**Environment Variables (Recommended):**
+
+Create `admin/.env` file to configure API connection:
+```bash
+# admin/.env
+ADMIN_API_BASE_URL=http://localhost:8000
+ADMIN_API_PREFIX=/api/v1
+ADMIN_API_TIMEOUT=30
+```
+
+Copy from example:
+```bash
+cd admin
+cp env.example .env
+# Edit .env with your settings
+```
+
+**Runtime Configuration:**
+
+You can also configure through the web interface:
+1. Navigate to **Settings** → **API Config** tab
+2. Update Base URL and API prefix
+3. Test connection
+4. Save (temporary until restart)
+
+**Note:** Environment variables provide persistent configuration across restarts.
+
+### Usage Tips
+
+**Performance Optimization:**
+- Use filters to reduce data volume when browsing events
+- Set reasonable limits (50-100 events) for optimal performance
+- Disable auto-refresh when not actively monitoring
+- Export large datasets for offline analysis
+
+**Security Considerations:**
+- Admin panel is designed for internal use only
+- No built-in authentication (use reverse proxy with auth for production)
+- API endpoints have no rate limiting by default
+- Always use HTTPS in production deployments
+
+**Troubleshooting:**
+- **Connection refused**: Ensure main API is running on port 8000
+- **Module not found**: Install dependencies with `pip install -r requirements.txt`
+- **Port in use**: Change port with `streamlit run app.py --server.port 8502`
+
+### Detailed Documentation
+
+For comprehensive admin panel documentation including:
+- Development guidelines
+- Custom page creation
+- API client extension
+- Production deployment
+- Screenshots and examples
+
+See: [admin/README.md](admin/README.md)
+
 ## 📚 API Reference
 
-### POST /api/v1/run_pipeline
+### Flow Endpoints
+
+#### POST /api/v1/flow/run
 
 Runs pipelines to analyze the input prompt.
 
@@ -386,7 +628,7 @@ Runs pipelines to analyze the input prompt.
 }
 ```
 
-### GET /api/v1/flows
+#### GET /api/v1/flow/list
 
 Get a list of all available flows and their pipelines.
 
@@ -407,7 +649,9 @@ Get a list of all available flows and their pipelines.
 }
 ```
 
-### GET /api/v1/manager/list
+### Manager Endpoints
+
+#### GET /api/v1/manager/list
 
 Get a list of all available managers and their clients.
 
@@ -425,7 +669,7 @@ Get a list of all available managers and their clients.
 }
 ```
 
-### GET /api/v1/manager/{manager_id}
+#### GET /api/v1/manager/{manager_id}
 
 Get information about a specific manager.
 
@@ -442,7 +686,7 @@ Get information about a specific manager.
 }
 ```
 
-### POST /api/v1/manager/switch_active_client
+#### POST /api/v1/manager/switch_active_client
 
 Switch the active client for a specific manager.
 
@@ -461,6 +705,137 @@ Switch the active client for a specific manager.
     "status": "boolean"
 }
 ```
+
+### Rules Management Endpoints
+
+#### POST /api/v1/rules
+
+Create a new detection rule.
+
+**Request Body:**
+```json
+{
+    "uuid": "550e8400-e29b-41d4-a716-446655440000",
+    "name": "SQL Injection Detection",
+    "details": "Detects SQL injection attempts",
+    "language": "llm-regex-pattern",
+    "pattern": "(?i)\\b(SELECT|INSERT|UPDATE|DELETE)\\b.*\\bFROM\\b",
+    "action": "block",
+    "severity": "high",
+    "category": "injection",
+    "cwe_id": "CWE-89",
+    "enabled": true
+}
+```
+
+**Response:**
+```json
+{
+    "id": 1,
+    "uuid": "550e8400-e29b-41d4-a716-446655440000",
+    "name": "SQL Injection Detection",
+    "enabled": true,
+    "created_at": "2025-01-13T10:00:00",
+    "updated_at": "2025-01-13T10:00:00"
+}
+```
+
+#### GET /api/v1/rules
+
+Get list of rules with optional filtering.
+
+**Query Parameters:**
+- `skip` (int): Number of records to skip (default: 0)
+- `limit` (int): Maximum records to return (default: 100)
+- `category` (string): Filter by category
+- `enabled` (bool): Filter by enabled status
+
+**Response:**
+```json
+{
+    "total": 150,
+    "rules": [
+        {
+            "id": 1,
+            "uuid": "550e8400-e29b-41d4-a716-446655440000",
+            "name": "SQL Injection Detection",
+            "action": "block",
+            "enabled": true
+        }
+    ]
+}
+```
+
+#### GET /api/v1/rules/{rule_id}
+
+Get rule by ID.
+
+#### PUT /api/v1/rules/{rule_id}
+
+Update existing rule.
+
+#### DELETE /api/v1/rules/{rule_id}
+
+Delete rule by ID.
+
+#### PATCH /api/v1/rules/{rule_id}/toggle
+
+Toggle rule enabled/disabled status.
+
+### Events & Analytics Endpoints
+
+#### GET /api/v1/events
+
+Get list of events with optional filtering.
+
+**Query Parameters:**
+- `skip` (int): Number of records to skip
+- `limit` (int): Maximum records to return
+- `status` (string): Filter by status (allow/block/notify)
+- `flow_name` (string): Filter by flow name
+
+**Response:**
+```json
+{
+    "total": 1000,
+    "events": [
+        {
+            "id": 1,
+            "task_id": "task-123",
+            "status": "block",
+            "flow_name": "full_scan",
+            "timestamp": "2025-01-13T10:00:00",
+            "pipeline_results": {...}
+        }
+    ]
+}
+```
+
+#### GET /api/v1/events/recent
+
+Get most recent events (default: 50).
+
+#### GET /api/v1/events/stats
+
+Get event statistics.
+
+**Response:**
+```json
+{
+    "total": 1000,
+    "blocked": 50,
+    "notified": 200,
+    "allowed": 750
+}
+```
+
+#### GET /api/v1/events/{event_id}
+
+Get event by ID.
+
+#### GET /api/v1/events/task/{task_id}
+
+Get event by task ID.
 
 ## 🔍 Pipelines
 
@@ -845,6 +1220,40 @@ class PipelineNames(str, Enum):
 
 ## 🧪 Development
 
+### Setting up Database
+
+The database is automatically initialized on first startup. For manual setup:
+
+**Using SQLite (Default):**
+```bash
+# Database is created automatically at ./data/aidr_bastion.db
+# No additional setup required
+```
+
+**Using PostgreSQL (Production):**
+```bash
+# 1. Create PostgreSQL database
+createdb aidr_bastion
+
+# 2. Update .env
+DATABASE_URL=postgresql+asyncpg://user:password@localhost/aidr_bastion
+
+# 3. Run migrations
+.venv/bin/alembic upgrade head
+```
+
+**Creating Migrations:**
+```bash
+# After model changes
+.venv/bin/alembic revision --autogenerate -m "Description of changes"
+
+# Apply migrations
+.venv/bin/alembic upgrade head
+
+# Rollback
+.venv/bin/alembic downgrade -1
+```
+
 ### Setting up OpenSearch
 
 1. **Install OpenSearch**
@@ -934,7 +1343,7 @@ The environment variable `KAFKA__SAVE_PROMPT` is optional. It controls whether t
 	"service": "AIDR Bastion",
 	"version": "1.0.0",
 	"timestamp": "2025-09-24T14:39:50.351466",
-	"task_id": 1 // unique identifier passed through endpoint run_pipeline
+	"task_id": 1 // unique identifier passed through /api/v1/flow/run endpoint
 }
 ```
 
@@ -989,8 +1398,11 @@ This project is built using the following powerful open-source libraries and fra
 ## 🛠️ TO-DO List
 
 - Integrate API with SOC Prime for automatic rule synchronization and uploads
-- Add local database storage for rules and events
+- ✅ **Add local database storage for rules and events** - COMPLETED
 - ✅ **Kafka support for scalable event streaming** - COMPLETED
-- Develop an admin panel for managing events and detection rules
+- ✅ **Develop an admin panel for managing events and detection rules** - COMPLETED
+- Add bulk import/export functionality for rules
+- Implement rule versioning and rollback
+- Add advanced analytics and reporting
 - Explore integration with [NOVA Rules](https://github.com/fr0gger/nova-framework/tree/main/nova_rules) to extend rule sources
 - Add YARA-L support

@@ -3,6 +3,8 @@ from datetime import datetime
 
 from app.core.enums import ActionStatus
 from app.core.pipeline import BasePipeline
+from app.db.crud import event_crud
+from app.db.session import async_session
 from app.models.pipeline import PipelineResult, TaskResult
 from app.modules.kafka_client import KafkaClient
 from app.utils import get_pipelines_from_config
@@ -73,6 +75,34 @@ class BastionApp:
                 payload["task_id"] = task_id
             self.kafka_client.send_message(payload)
 
+    async def __save_to_db(
+        self, prompt: str, task: TaskResult, pipeline_flow: str, task_id: str | int | None = None
+    ) -> None:
+        """
+        Save event to database.
+
+        Args:
+            prompt: Analyzed prompt
+            task: Task result
+            pipeline_flow: Pipeline flow name
+            task_id: Optional task identifier
+        """
+        try:
+            async with async_session() as session:
+                event_data = {
+                    "task_id": str(task_id) if task_id else None,
+                    "prompt": prompt if self.settings.DATABASE_SAVE_PROMPT else None,
+                    "status": task.status.value,
+                    "flow_name": pipeline_flow,
+                    "pipeline_results": task.model_dump(mode="json"),
+                }
+                await event_crud.create(session, obj_in=event_data)
+                await session.commit()
+        except Exception as e:
+            from app.modules.logger import bastion_logger
+
+            bastion_logger.error(f"Failed to save event to database: {e}")
+
     async def run(self, prompt: str, pipeline_flow: str, task_id: str | int | None = None) -> TaskResult:
         """
         Executes the task process for a given prompt using the specified pipeline flow.
@@ -95,7 +125,13 @@ class BastionApp:
         ]
         status = self.__task_status(pipelines_result)
         task = TaskResult(status=status, pipelines=pipelines_result)
+
+        # Send to Kafka if configured
         self.__send_to_kafka(prompt=prompt, task_id=task_id, task=task)
+
+        # Save to database
+        await self.__save_to_db(prompt=prompt, task=task, pipeline_flow=pipeline_flow, task_id=task_id)
+
         return task
 
 
